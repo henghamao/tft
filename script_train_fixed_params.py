@@ -85,7 +85,8 @@ def main(expt_name,
   print("*** Training from defined parameters for {} ***".format(expt_name))
 
   print("Loading & splitting data...")
-  raw_data = pd.read_csv(data_csv_path, index_col=0)
+  #raw_data = pd.read_csv(data_csv_path, index_col=0)
+  raw_data = pd.read_csv(data_csv_path)
   train, valid, test = data_formatter.split_data(raw_data)
   train_samples, valid_samples = data_formatter.get_num_samples_for_calibration(
   )

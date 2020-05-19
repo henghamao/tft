@@ -1159,7 +1159,7 @@ class TemporalFusionTransformer(object):
         callbacks=all_callbacks,
         shuffle=True,
         use_multiprocessing=True,
-        workers=self.n_multiprocessing_workers)
+        workers=self.n_multiprocessing_workers, verbose=2)
 
     # Load best checkpoint again
     tmp_checkpont = self.get_keras_saved_path(self._temp_folder)
