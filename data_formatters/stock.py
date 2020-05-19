@@ -1,10 +1,75 @@
+import random
+
 import data_formatters.base
 import libs.utils as utils
 import sklearn.preprocessing
+import os
+import pandas as pd
+from data_formatters.data_model import StockDataSet
 
 GenericDataFormatter = data_formatters.base.GenericDataFormatter
 DataTypes = data_formatters.base.DataTypes
 InputTypes = data_formatters.base.InputTypes
+
+
+def load_stocks(input_size, num_steps, k=None, target_symbol=None, test_ratio=0.05, window=1, train=False,
+                evaluate=False, from_db=True, data_dir='data'):
+    if target_symbol is not None:
+        return [
+            StockDataSet(
+                target_symbol,
+                input_size=input_size,
+                num_steps=num_steps,
+                test_ratio=test_ratio,
+                window=window,
+                train=train,
+                evaluate=evaluate,
+                from_db=from_db,
+                data_dir=data_dir,
+            )
+        ]
+
+    symbols = []
+    data_dir = os.path.join(data_dir, 'data_dir')
+    data_dir = os.path.join(data_dir, 'stock')
+    file_black = ["_stock_list.csv", "stock_list.csv", "constituents-financials.csv"]
+    # Load metadata
+    s = dict()
+    if os.path.exists(os.path.join(data_dir, 'stock_list.csv')):
+        info = pd.read_csv(os.path.join(data_dir, 'stock_list.csv'))
+        info = info.rename(columns={col: col.lower().replace(' ', '_') for col in info.columns})
+        info['file_exists'] = info['symbol'].map(lambda x: os.path.exists("data/{}.csv".format(x)))
+        print(info['file_exists'].value_counts().to_dict())
+        info = info[info['file_exists'] == True].reset_index(drop=True)
+        symbols = info['symbol'].tolist()
+    else:
+
+        for root, dirs, files in os.walk(data_dir):
+            for file in files:
+                if os.path.splitext(file)[1] == '.csv' and file not in file_black:
+                    s[os.path.splitext(file)[0]] = os.path.getsize(os.path.join(data_dir, file))
+            # Order by file size (data samples)
+            symbols += sorted(s.items(), key=lambda d: d[1], reverse=True)
+        symbols = [symbols[i][0] for i in range(len(symbols))]
+
+    if k is not None:
+        symbols = symbols[:k]
+    sl = []
+    p = 0
+    for s in symbols:
+        p += 1
+        print('Init data for symbol:%s, progress: %d/%d' % (s, p, len(symbols)))
+        sl.append(StockDataSet(s,
+                               input_size=input_size,
+                               num_steps=num_steps,
+                               test_ratio=test_ratio,
+                               window=window,
+                               train=train,
+                               evaluate=evaluate,
+                               from_db=from_db,
+                               data_dir=data_dir,
+                               ))
+    return sl
 
 
 class StockFormatter(GenericDataFormatter):
@@ -50,6 +115,12 @@ class StockFormatter(GenericDataFormatter):
         self._cat_scalers = None
         self._target_scaler = None
         self._num_classes_per_cat_input = None
+        # the number of csv files to read from the data folder
+        self.stock_count = 10
+        self.input_size = 22
+        self.fix_param = self.get_fixed_params()
+        self.num_steps = self.fix_param['total_time_steps']
+        self.sl = load_stocks(input_size=self.input_size, num_steps=self.num_steps)
 
     def split_data(self, df, valid_boundary=2016, test_boundary=2018):
         """Splits data frame into training-validation-test data frames.
@@ -64,25 +135,32 @@ class StockFormatter(GenericDataFormatter):
     Returns:
       Tuple of transformed (train, valid, test) data.
     """
+
+        stock_count = len(self.sl)
         test_ratio = 0.2
-        valid_ratio = 0.1
-        print('Test ratio:%f' % test_ratio)
-        total_len = len(df)
-        test_len = int(total_len * test_ratio)
-        valid_len = int(total_len * valid_ratio)
-        train_len = total_len - valid_len - test_len
-        print(
-            'Total size:%d, train size:%d, test size:%d, valid size:%d' % (total_len, train_len, test_len, valid_len))
+        print('Stock count:%d'% stock_count)
+        data_len = 0
+        train_len = 0
+        train_x = []
+        train_y = []
+        train_index = []
+        train_step = 0
+        # shuffle = False
+        for label_, d_ in enumerate(self.sl):
+            data_len += len(d_.train_y)
+            stock_train_len = int(len(d_.train_y) * (1 - test_ratio))
+            train_len += stock_train_len
+            train_x += list(d_.train_x)
+            train_y += list(d_.train_y)
+            train_index += [i for i in range(train_step, train_step + len(d_.train_y))]
+            train_step += len(d_.train_y) + self.fix_param['total_time_steps']
+        visit_seq = list(range(data_len))
+        random.shuffle(visit_seq)
 
-        print('Formatting train-valid-test splits.')
-
-        train = df.iloc[:train_len]
-        valid = df.iloc[train_len + test_len:]
-        test = df.iloc[train_len:train_len + test_len]
-
-        self.set_scalers(train)
-
-        return (self.transform_inputs(data) for data in [train, valid, test])
+        train_g = StockDataSet.train_data(train_x, train_y, self.num_steps, train_index, visit_seq, train_len)
+        test_g = StockDataSet.test_data(train_x, train_y, self.num_steps, train_index, visit_seq, train_len)
+        # used test for both valid and test
+        return train_g, test_g, test_g
 
     def set_scalers(self, df):
         """Calibrates scalers using the data supplied.
