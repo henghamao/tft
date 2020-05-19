@@ -190,7 +190,7 @@ class StockFormatter(GenericDataFormatter):
 
         fixed_params = {
             'total_time_steps': 40,
-            'num_encoder_steps': 39,
+            'num_encoder_steps': 35,
             'num_epochs': 100,
             'early_stopping_patience': 10,
             'multiprocessing_workers': 5,

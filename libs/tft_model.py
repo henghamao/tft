@@ -1092,7 +1092,7 @@ class TemporalFusionTransformer(object):
       quantile_loss = QuantileLossCalculator(valid_quantiles).quantile_loss
 
       model.compile(
-          loss=quantile_loss, optimizer=adam, sample_weight_mode='temporal')
+          loss=quantile_loss, optimizer=adam, sample_weight_mode='temporal', metrics=['mae'])
 
       self._input_placeholder = all_inputs
 
