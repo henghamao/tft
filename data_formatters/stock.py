@@ -30,7 +30,7 @@ def load_stocks(input_size, num_steps, k=None, target_symbol=None, test_ratio=0.
         ]
 
     symbols = []
-    data_dir = os.path.join(data_dir, 'data_dir')
+    data_dir = os.path.join(data_dir, 'data')
     data_dir = os.path.join(data_dir, 'stock')
     file_black = ["_stock_list.csv", "stock_list.csv", "constituents-financials.csv"]
     # Load metadata
@@ -66,7 +66,6 @@ def load_stocks(input_size, num_steps, k=None, target_symbol=None, test_ratio=0.
                                window=window,
                                train=train,
                                evaluate=evaluate,
-                               from_db=from_db,
                                data_dir=data_dir,
                                ))
     return sl
@@ -82,14 +81,16 @@ class StockFormatter(GenericDataFormatter):
   """
 
     _column_definition = [
-        ('code', DataTypes.CATEGORICAL, InputTypes.ID),
+        ('Symbol', DataTypes.CATEGORICAL, InputTypes.ID),
         ('date', DataTypes.DATE, InputTypes.TIME),
         ('close', DataTypes.REAL_VALUED, InputTypes.TARGET),
         ('open', DataTypes.REAL_VALUED, InputTypes.OBSERVED_INPUT),
         ('high', DataTypes.REAL_VALUED, InputTypes.OBSERVED_INPUT),
         ('low', DataTypes.REAL_VALUED, InputTypes.OBSERVED_INPUT),
         ('volume', DataTypes.REAL_VALUED, InputTypes.OBSERVED_INPUT),
-        ('amount', DataTypes.REAL_VALUED, InputTypes.OBSERVED_INPUT),
+        ('turn', DataTypes.REAL_VALUED, InputTypes.OBSERVED_INPUT),
+        ('sma5', DataTypes.REAL_VALUED, InputTypes.OBSERVED_INPUT),
+        ('code_hash', DataTypes.REAL_VALUED, InputTypes.STATIC_INPUT),
         ('circulating_market_cap', DataTypes.REAL_VALUED, InputTypes.OBSERVED_INPUT),
         ('pe_ratio', DataTypes.REAL_VALUED, InputTypes.OBSERVED_INPUT),
         ('pb_ratio', DataTypes.REAL_VALUED, InputTypes.OBSERVED_INPUT),
@@ -104,7 +105,6 @@ class StockFormatter(GenericDataFormatter):
         ('day', DataTypes.CATEGORICAL, InputTypes.KNOWN_INPUT),
         ('week', DataTypes.CATEGORICAL, InputTypes.KNOWN_INPUT),
         ('month', DataTypes.CATEGORICAL, InputTypes.KNOWN_INPUT),
-        ('code_hash', DataTypes.CATEGORICAL, InputTypes.STATIC_INPUT),
     ]
 
     def __init__(self):
@@ -120,7 +120,7 @@ class StockFormatter(GenericDataFormatter):
         self.input_size = 22
         self.fix_param = self.get_fixed_params()
         self.num_steps = self.fix_param['total_time_steps']
-        self.sl = load_stocks(input_size=self.input_size, num_steps=self.num_steps)
+        self.sl = load_stocks(input_size=self.input_size, num_steps=self.num_steps, train=True)
 
     def split_data(self, df, valid_boundary=2016, test_boundary=2018):
         """Splits data frame into training-validation-test data frames.
@@ -139,26 +139,27 @@ class StockFormatter(GenericDataFormatter):
         stock_count = len(self.sl)
         test_ratio = 0.2
         print('Stock count:%d'% stock_count)
-        data_len = 0
-        train_len = 0
         train_x = []
-        train_y = []
-        train_index = []
-        train_step = 0
-        # shuffle = False
+        test_x = []
         for label_, d_ in enumerate(self.sl):
-            data_len += len(d_.train_y)
             stock_train_len = int(len(d_.train_y) * (1 - test_ratio))
-            train_len += stock_train_len
-            train_x += list(d_.train_x)
-            train_y += list(d_.train_y)
-            train_index += [i for i in range(train_step, train_step + len(d_.train_y))]
-            train_step += len(d_.train_y) + self.fix_param['total_time_steps']
-        visit_seq = list(range(data_len))
-        random.shuffle(visit_seq)
+            train_x += list(d_.train_x[:stock_train_len])
+            test_x += list(d_.train_x[stock_train_len:])
 
-        train_g = StockDataSet.train_data(train_x, train_y, self.num_steps, train_index, visit_seq, train_len)
-        test_g = StockDataSet.test_data(train_x, train_y, self.num_steps, train_index, visit_seq, train_len)
+        train_g = pd.DataFrame(train_x, columns=([k[0] for k in self._column_definition]))
+        test_g = pd.DataFrame(test_x, columns=([k[0] for k in self._column_definition]))
+
+        self.set_scalers(train_g)
+
+        def tofloat(data):
+            for col in data.columns:
+                if col not in {'Symbol', 'date'}:
+                    data[col] = data[col].astype('float32')
+            return data
+
+
+        train_g = tofloat(train_g)
+        test_g = tofloat(test_g)
         # used test for both valid and test
         return train_g, test_g, test_g
 
@@ -258,7 +259,7 @@ class StockFormatter(GenericDataFormatter):
 
         for col in column_names:
             if col not in {'forecast_time', 'identifier'}:
-                output[col] = self._target_scaler.inverse_transform(predictions[col])
+                output[col] = predictions[col]
 
         return output
 
