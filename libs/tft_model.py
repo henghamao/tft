@@ -447,7 +447,7 @@ class TemporalFusionTransformer(object):
     self.column_definition = params['column_definition']
 
     # Network params
-    self.quantiles = [0.1, 0.5, 0.9]
+    self.quantiles = [0.1]
     self.use_cudnn = use_cudnn  # Whether to use GPU optimised LSTM
     self.hidden_layer_size = int(params['hidden_layer_size'])
     self.dropout_rate = float(params['dropout_rate'])
@@ -1042,11 +1042,11 @@ class TemporalFusionTransformer(object):
           = self._build_base_graph()
 
       outputs = tf.keras.layers.TimeDistributed(
-          tf.keras.layers.Dense(self.output_size * len(self.quantiles))) \
+          tf.keras.layers.Dense(self.output_size)) \
           (transformer_layer[Ellipsis, self.num_encoder_steps:, :])
 
       self._attention_components = attention_components
-
+      outputs = tf.keras.layers.Flatten()(outputs)
       adam = tf.keras.optimizers.Adam(
           lr=self.learning_rate, clipnorm=self.max_gradient_norm)
 
@@ -1092,7 +1092,7 @@ class TemporalFusionTransformer(object):
       quantile_loss = QuantileLossCalculator(valid_quantiles).quantile_loss
 
       model.compile(
-          loss=quantile_loss, optimizer=adam, sample_weight_mode='temporal', metrics=['mae'])
+          loss='mse', optimizer=adam, metrics=['mae'])
 
       self._input_placeholder = all_inputs
 
@@ -1118,7 +1118,7 @@ class TemporalFusionTransformer(object):
             filepath=self.get_keras_saved_path(self._temp_folder),
             monitor='val_loss',
             save_best_only=True,
-            save_weights_only=True),
+            save_weights_only=True, verbose=1),
         tf.keras.callbacks.TerminateOnNaN()
     ]
 
@@ -1147,15 +1147,19 @@ class TemporalFusionTransformer(object):
 
     all_callbacks = callbacks
 
+    labels = np.reshape(labels, [-1, 1])
+    val_labels = np.reshape(val_labels, [-1, 1])
+
     self.model.fit(
         x=data,
-        y=np.concatenate([labels, labels, labels], axis=-1),
-        sample_weight=active_flags,
+        #y=np.concatenate([labels, labels, labels], axis=-1),
+        y=labels,
+        #sample_weight=active_flags,
         epochs=self.num_epochs,
         batch_size=self.minibatch_size,
-        validation_data=(val_data,
-                         np.concatenate([val_labels, val_labels, val_labels],
-                                        axis=-1), val_flags),
+        validation_data=(val_data, val_labels),
+                         #np.concatenate([val_labels, val_labels, val_labels],axis=-1),
+                         # val_flags),
         callbacks=all_callbacks,
         shuffle=True,
         use_multiprocessing=True,
@@ -1190,12 +1194,13 @@ class TemporalFusionTransformer(object):
 
     inputs = raw_data['inputs']
     outputs = raw_data['outputs']
-    active_entries = self._get_active_locations(raw_data['active_entries'])
-
+    #active_entries = self._get_active_locations(raw_data['active_entries'])
+    outputs = np.reshape(outputs, [-1, 1])
     metric_values = self.model.evaluate(
         x=inputs,
-        y=np.concatenate([outputs, outputs, outputs], axis=-1),
-        sample_weight=active_entries,
+        #y=np.concatenate([outputs, outputs, outputs], axis=-1),
+        y=outputs,
+        #sample_weight=active_entries,
         workers=16,
         use_multiprocessing=True)
 
@@ -1227,7 +1232,6 @@ class TemporalFusionTransformer(object):
         workers=16,
         use_multiprocessing=True,
         batch_size=self.minibatch_size)
-
     # Format output_csv
     if self.output_size != 1:
       raise NotImplementedError('Current version only supports 1D targets!')
@@ -1236,7 +1240,7 @@ class TemporalFusionTransformer(object):
       """Returns formatted dataframes for prediction."""
 
       flat_prediction = pd.DataFrame(
-          prediction[:, :, 0],
+          prediction[:, 0],
           columns=[
               't+{}'.format(i)
               for i in range(self.time_steps - self.num_encoder_steps)

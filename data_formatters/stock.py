@@ -120,7 +120,7 @@ class StockFormatter(GenericDataFormatter):
         self.input_size = 22
         self.fix_param = self.get_fixed_params()
         self.num_steps = self.fix_param['total_time_steps']
-        self.sl = load_stocks(input_size=self.input_size, num_steps=self.num_steps, train=True)
+        self.sl = load_stocks(input_size=self.input_size, k=self.stock_count, num_steps=self.num_steps, train=True)
 
     def split_data(self, df, valid_boundary=2016, test_boundary=2018):
         """Splits data frame into training-validation-test data frames.
@@ -269,10 +269,10 @@ class StockFormatter(GenericDataFormatter):
 
         fixed_params = {
             'total_time_steps': 40,
-            'num_encoder_steps': 35,
+            'num_encoder_steps': 39,
             'num_epochs': 100,
             'early_stopping_patience': 10,
-            'multiprocessing_workers': 5,
+            'multiprocessing_workers': 2,
         }
 
         return fixed_params
